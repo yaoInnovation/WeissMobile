@@ -396,7 +396,9 @@ public class MainActivity extends Activity {
     class DialogUtil extends AsyncTask<String, Void, Void> {
         private static final String USER_AGENT = "Mozilla/5.0";
         //For local test, run server on 0.0.0.0:8000 and use wifi ipv4 ip to access
-        private static final String hostname = "http://192.168.0.101";
+        //128.237.209.248
+        //genymotion:10.0.3.2
+        private static final String hostname = "http://128.237.209.248";
         private static final int port = 8000;
         private int fid = -1;
         private static final String TAG = "DialogUtil";
@@ -432,10 +434,12 @@ public class MainActivity extends Activity {
 
         @Override
         protected void onPostExecute(Void result) {
-            Log.d(TAG, "OnPostExecute background:"+response.get(0));
-            if(response == null) {
+            if(response == null || response.size() == 0) {
+                Toast.makeText(MainActivity.this, "Cannot connect to server",Toast.LENGTH_SHORT );
                 return;
             }
+
+            Log.d(TAG, "OnPostExecute background:"+response.get(0));
 
             if(option.equals("init")) {
                 FID = Integer.parseInt(response.get(0));
@@ -484,7 +488,7 @@ public class MainActivity extends Activity {
             //Get greetings
             JsonElement greetingsObj = jsonParser.parse(responseString).getAsJsonObject().get("response");
             response.add(greetingsObj.toString());
-            Log.d(TAG, "Init Background, got response:" + response.get(1));
+            //Log.d(TAG, "Init Background, got response:" + response.get(1));
 
             return response;
         }
@@ -521,11 +525,11 @@ public class MainActivity extends Activity {
          */
         private String getRequest(String url) {
             try {
-                Log.d(TAG, "Get request Background:"+url);
+                Log.d(TAG, "Get request Background start:"+url);
                 HttpClient httpClient = new DefaultHttpClient();
                 HttpGet httpGet = new HttpGet(url);
                 HttpResponse response = httpClient.execute(httpGet);
-
+                Log.d(TAG, "Get request Background end:"+url);
                 int responseCode = response.getStatusLine().getStatusCode();
                 if(responseCode != 200) {
                     Log.d(TAG, "Get request responseCode:"+responseCode);
@@ -535,7 +539,7 @@ public class MainActivity extends Activity {
                     HttpEntity entity = response.getEntity();
                     String responseString = null;
                     if(entity != null) {
-                        Log.d(TAG, "Get request Background:"+responseString);
+                        Log.d(TAG, "Get request Background, entity=null:"+responseString);
                         responseString = EntityUtils.toString(entity);
                     }
                     Log.d(TAG, "Get request Background:"+responseString);

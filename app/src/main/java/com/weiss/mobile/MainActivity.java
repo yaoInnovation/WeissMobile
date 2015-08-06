@@ -1,11 +1,14 @@
 package com.weiss.mobile;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.DataSetObserver;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -26,9 +29,12 @@ import android.widget.Toast;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.weiss.bubblechat.R;
 
+import org.apache.commons.lang3.StringEscapeUtils;
+import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -39,11 +45,16 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.util.EntityUtils;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 
 public class MainActivity extends Activity {
     private static final String TAG = "Weiss Main";
+    private static final String VALID_RETURN = "0";
+    private static final String INVALID_RETURN = "-1";
+    private static final String ERROR_MSG = "Sorry, Weiss tried so hard but still failed " +
+            "to answer your question :(";
     private static final int SPEECH = 1;
     private static final String INIT_OPT = "init";
     private static final String INQUIRY_OPT = "inquiry";
@@ -52,7 +63,7 @@ public class MainActivity extends Activity {
     //Utils
     private TextToSpeech tts = null;
     private SpeechRecognizer mSpeechRecognizer; //speach recognizer for callbacks
-    Intent mSpeechIntent; //intent for speech recogniztion
+    Intent mSpeechIntent; //intent for speech recognition
     DialogUtil dialogUtil = null;
 
     //Widgets
@@ -65,10 +76,13 @@ public class MainActivity extends Activity {
     private ImageButton modeBtn = null;
 
     //Flags
-    private boolean isTalking = false; // indicate current input mode
+    private static boolean isTalking = false; // indicate current input mode
     private int ttsResult = -1; // To store TTS result
-    private boolean  isListenning = false;
-    private boolean side = true;
+    private static boolean  isListenning = false;
+    private static boolean side = true;
+
+    //Connection cookies
+    private static Header[] cookieHeaders = null;
 
     @Override
     protected void onDestroy() {
@@ -129,8 +143,6 @@ public class MainActivity extends Activity {
 
         //Set List View for Dialog System
         chatArrayAdapter = new ChatArrayAdapter(getApplicationContext(), R.layout.activity_chat_singlemessage);
-        listView.setTranscriptMode(AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL);
-        listView.setAdapter(chatArrayAdapter);
 
         //to scroll the list view to bottom on data change
         chatArrayAdapter.registerDataSetObserver(new DataSetObserver() {
@@ -141,13 +153,27 @@ public class MainActivity extends Activity {
             }
         });
 
+        listView.setTranscriptMode(AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL);
+        listView.setAdapter(chatArrayAdapter);
 
-        //Set dialog Util
-        dialogUtil = new DialogUtil();
-        String []init = new String[1];
-        init[0] = INIT_OPT;
-        dialogUtil.execute(init);
+        if(savedInstanceState!=null) {
+            Log.d("savedInstanceState", "not null");
+            //listView.onRestoreInstanceState(savedInstanceState.getParcelable("DiaHistory"));
+        } else {
 
+            Log.d("savedInstanceState", "null");
+            //Set dialog Util
+            dialogUtil = new DialogUtil();
+            String[] init = new String[1];
+            init[0] = INIT_OPT;
+            dialogUtil.execute(init);
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        //outState.putParcelableArray("DiaHistory", (ParserchatArrayAdapter.getHistory());
+        super.onSaveInstanceState(outState);
     }
 
     private String getResponse(String query) {
@@ -177,10 +203,9 @@ public class MainActivity extends Activity {
         String res = getResponse(query);
         dialogUtil = new DialogUtil();
 
-        String []queryParams = new String[3];
+        String []queryParams = new String[2];
         queryParams[0] = INQUIRY_OPT;
-        queryParams[1] = Integer.toString(this.FID);
-        queryParams[2] = query;
+        queryParams[1] = query;
         dialogUtil.execute(queryParams);
 
         queryText.setText("");
@@ -199,10 +224,9 @@ public class MainActivity extends Activity {
         side = !side;
 
         dialogUtil = new DialogUtil();
-        String []queryParams = new String[3];
+        String []queryParams = new String[2];
         queryParams[0] = INQUIRY_OPT;
-        queryParams[1] = Integer.toString(this.FID);
-        queryParams[2] = query;
+        queryParams[1] = query;
         dialogUtil.execute(queryParams);
 
         queryText.setText("");
@@ -398,15 +422,13 @@ public class MainActivity extends Activity {
         //For local test, run server on 0.0.0.0:8000 and use wifi ipv4 ip to access
         //128.237.209.248
         //genymotion:10.0.3.2
-        private static final String hostname = "http://128.237.209.248";
-        private static final int port = 8000;
-        private int fid = -1;
+        private static final String hostname = "http://awb.pc.cs.cmu.edu";
+        private static final int port = 80;
         private static final String TAG = "DialogUtil";
 
         private static final String initURL = "/api/init";
         private static final String inqueryURL = "/api/inquire";
         private static final String closeURL = "/api/close";
-
 
         private ArrayList<String> response = null;
         private String option = "";
@@ -418,14 +440,13 @@ public class MainActivity extends Activity {
         @Override
         protected Void doInBackground(String... params) {
             option = params[0];
-            Log.d(TAG, "Do it background, opt:"+option);
+            Log.d(TAG, "Do it background, opt:" + option);
 
             if(option.equals("init")) {
                 init();
             } else if (option.equals("inquiry")) {
-                fid = Integer.parseInt(params[1]);
-                String query = params[2];
-                inquiry(this.fid, query);
+                String query = params[1];
+                inquiry(query);
             } else {
                 close();
             }
@@ -435,21 +456,28 @@ public class MainActivity extends Activity {
         @Override
         protected void onPostExecute(Void result) {
             if(response == null || response.size() == 0) {
-                Toast.makeText(MainActivity.this, "Cannot connect to server",Toast.LENGTH_SHORT );
+                Toast.makeText(MainActivity.this, "Cannot connect to server",Toast.LENGTH_SHORT ).show();
                 return;
             }
 
-            Log.d(TAG, "OnPostExecute background:"+response.get(0));
-
             if(option.equals("init")) {
-                FID = Integer.parseInt(response.get(0));
-                String greetings = response.get(1);
+                //FID = Integer.parseInt(response.get(0));
+                String greetings = response.get(0);
                 chatArrayAdapter.add(new ChatMessage(side, greetings));
                 side = !side;
 
 
             } else if (option.equals("inquiry")) {
-                String inqueryResponse = response.get(0);
+                String responseCode = response.get(0);
+                String inqueryResponse = response.get(1);
+                if(responseCode.equals("-1")) {
+                    //Invalid Response!
+                    Log.d(TAG, "OnPostExecute background:" + response.get(1));
+                    chatArrayAdapter.add(new ChatMessage(side, ERROR_MSG));
+                    side = !side;
+                    return;
+                }
+                inqueryResponse = inqueryResponse.replace("\\\\", "\\");
                 chatArrayAdapter.add(new ChatMessage(side, inqueryResponse));
                 side = !side;
 
@@ -473,27 +501,30 @@ public class MainActivity extends Activity {
 
             String url = hostname+":"+port+initURL;
 
-            String responseString = getRequest(url);
+            List<String> responseString = getRequest(url);
             if(responseString == null) {
-                return null;
+                quitApp("This is impossible!");
             }
-
+            //Check return value
+            if(responseString.get(0).equals(INVALID_RETURN)){
+                quitApp(responseString.get(1));
+            }
             JsonParser jsonParser = new JsonParser();
 
             //Get fid
-            JsonElement fidObj = jsonParser.parse(responseString).getAsJsonObject().get("fid");
-            response.add(fidObj.toString());
-            this.fid = Integer.parseInt(fidObj.toString());
+            //JsonElement fidObj = jsonParser.parse(responseString).getAsJsonObject().get("fid");
+            //response.add(fidObj.toString());
+            //this.fid = Integer.parseInt(fidObj.toString());
 
             //Get greetings
-            JsonElement greetingsObj = jsonParser.parse(responseString).getAsJsonObject().get("response");
+            JsonElement greetingsObj = jsonParser.parse(responseString.get(1)).getAsJsonObject().get("response");
             response.add(greetingsObj.toString());
             //Log.d(TAG, "Init Background, got response:" + response.get(1));
 
             return response;
         }
 
-        public ArrayList<String> inquiry(int fid, String query) {
+        public ArrayList<String> inquiry(String query) {
 
             String url = hostname+":"+port+inqueryURL;
             String responseString = queryPostRequest(url, query);
@@ -504,10 +535,19 @@ public class MainActivity extends Activity {
             JsonParser jsonParser = new JsonParser();
             response = new ArrayList<String>();
 
-            //Get greetings
-            JsonElement responseObj = jsonParser.parse(responseString).getAsJsonObject().get("response");
-            response.add(responseObj.toString());
-
+            //Get Response
+            try {
+                JsonElement responseObj = jsonParser.parse(responseString).getAsJsonObject().get("response");
+                //Correct Response
+                response.add("0");
+                response.add(processAnswer(responseObj.toString()));
+                Log.d("Inquiry Response:", "Inquiry Response:" + response);
+            } catch(JsonParseException e) {
+                //Invalid Response
+                response.add("-1");
+                Log.d("ERROR_MSG", e.getMessage());
+                response.add(ERROR_MSG);
+            }
             return response;
         }
 
@@ -523,12 +563,15 @@ public class MainActivity extends Activity {
          * @param url
          * @return
          */
-        private String getRequest(String url) {
+        private ArrayList<String> getRequest(String url) {
+            ArrayList<String> getRequestResponse = new ArrayList<>();
+
             try {
-                Log.d(TAG, "Get request Background start:"+url);
+                Log.d(TAG, "Get request Background start:" + url);
                 HttpClient httpClient = new DefaultHttpClient();
                 HttpGet httpGet = new HttpGet(url);
                 HttpResponse response = httpClient.execute(httpGet);
+
                 Log.d(TAG, "Get request Background end:"+url);
                 int responseCode = response.getStatusLine().getStatusCode();
                 if(responseCode != 200) {
@@ -539,19 +582,37 @@ public class MainActivity extends Activity {
                     HttpEntity entity = response.getEntity();
                     String responseString = null;
                     if(entity != null) {
-                        Log.d(TAG, "Get request Background, entity=null:"+responseString);
                         responseString = EntityUtils.toString(entity);
+                        Log.d(TAG, "Get request Background:" + responseString);
+                    } else {
+                        getRequestResponse.add(INVALID_RETURN);
+                        getRequestResponse.add("Entity returned null");
+                        return getRequestResponse;
                     }
-                    Log.d(TAG, "Get request Background:"+responseString);
-                    return responseString;
+                    //Set up cookie headers
+                    cookieHeaders = response.getHeaders("Set-Cookie");
+                    if(cookieHeaders == null) {
+                        Log.d("Cookie", "No cookie sent back!");
+                        getRequestResponse.add(INVALID_RETURN);
+                        getRequestResponse.add("No cookie sent back!");
+                        return getRequestResponse;
+                    } else {
+                        Log.d("Cookie", "Got cookie, cookie[0]="+cookieHeaders[0].getValue());
+                    }
+                    getRequestResponse.add(VALID_RETURN);
+                    getRequestResponse.add(responseString);
+                    //TODO ADD CLOSE
+                    return getRequestResponse;
                 }
 
 
             }catch(Exception e) {
                 e.printStackTrace();
                 Log.d(TAG, e.getClass().getSimpleName());
-                Log.d(TAG, "URL:"+url);
-                return null;
+                Log.d(TAG, "URL:" + url);
+                getRequestResponse.add(INVALID_RETURN);
+                getRequestResponse.add(e.getMessage());
+                return getRequestResponse;
             }
         }
 
@@ -564,7 +625,15 @@ public class MainActivity extends Activity {
         public String queryPostRequest(String URL, String query) {
             Gson gson= new Gson();
             HttpPost post = new HttpPost(URL);
-            Query q = new Query(this.fid, query);
+
+            //Generate Cookie
+            String cookieString = "";
+            for(Header header : cookieHeaders) {
+                cookieString = cookieString + header.getValue()+";";
+            }
+
+            post.setHeader("Cookie", cookieString);
+            Query q = new Query(query);
             HttpClient httpClient = new DefaultHttpClient();
 
             try {
@@ -574,20 +643,23 @@ public class MainActivity extends Activity {
                 HttpResponse response = httpClient.execute(post);
 
                 int responseCode = response.getStatusLine().getStatusCode();
-                if(responseCode != 200)
-                    return null;
+                if(responseCode != 200) {
+                    Log.d(TAG, "responseCode:" + responseCode + ",url:" + URL);
+                    return "Incorrect Return Code:"+responseCode;
+                }
                 else {
                     HttpEntity entity = response.getEntity();
                     String responseString = null;
                     if(entity != null) {
                         responseString = EntityUtils.toString(entity);
+                    } else {
+                        responseString = "Empty String";
                     }
                     Log.d(TAG, "queryPostRequest:"+responseString);
                     return responseString;
                 }
             } catch(Exception e) {
-                Log.d(TAG, e.getClass().getSimpleName());
-                return null;
+                return e.getMessage();
             }finally {
                 httpClient.getConnectionManager().shutdown();
             }
@@ -602,12 +674,15 @@ public class MainActivity extends Activity {
             HttpPost post = new HttpPost(URL);
 
             HttpClient httpClient = new DefaultHttpClient();
+            //Generate Cookie
+            String cookieString = "";
+            for(Header header : cookieHeaders) {
+                cookieString = cookieString + header.getValue()+";";
+            }
+            post.setHeader("Cookie", cookieString);
 
             try {
-                StringEntity postingString = new StringEntity(gson.toJson(this.fid));//convert query to json
-                post.setEntity(postingString);
                 post.setHeader("Content-type", "application/json");
-
             } catch(Exception e) {
                 Log.d(TAG, e.getClass().getSimpleName());
             }finally {
@@ -616,15 +691,51 @@ public class MainActivity extends Activity {
         }
 
         private class Query {
-            int fid = 0;
             String query;
 
-            Query(int fid, String query) {
-                this.fid = fid;
+            Query(String query) {
                 this.query = query;
             }
 
         }
+    }
+
+    private void quitApp(String msg) {
+        Looper.prepare();
+        new AlertDialog.Builder(MainActivity.this)
+                .setTitle("Error Occur")
+                .setMessage("Sorry, weiss crashed :( Reason:" + msg)
+                .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                        onDestroy();
+                    }
+                })
+//                .setNegativeButton(android.R.string.no, new DialogInterface.OnClickListener() {
+//                    public void onClick(DialogInterface dialog, int which) {
+//                        // do nothing
+//                    }
+//                })
+//                .setIcon(android.R.drawable.ic_dialog_alert)
+                .show();
+        Looper.loop();
+        return;
+    }
+
+    private String processAnswer(String response) {
+        //Server may already fixed this
+        response = response.replace("\\\\","\\");
+        response = response.replace("\\","");
+        response = response.replace("\\r", "\r");
+        response = response.replace("\\n", "\n");
+        response = response.replace("\\t", "\t");
+        response = StringEscapeUtils.unescapeHtml4(response);
+//        response = response.replace("/&lt;/g", "<");
+//        response = response.replace("/&gt;/g", ">");
+//        response = response.replace("/&quot;/g", "\"");
+//        response = response.replace("/&#39;/g", "\'");
+//        response = response.replace("/&amp;/g", "&");
+        return response;
     }
 
 }

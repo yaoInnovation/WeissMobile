@@ -1,6 +1,8 @@
 package com.weiss.mobile;
 
-public class ChatMessage {
+import java.io.Serializable;
+
+public class ChatMessage  implements Serializable {
 	public boolean left;
 	public String message;
 

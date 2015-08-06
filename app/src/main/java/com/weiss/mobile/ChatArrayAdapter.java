@@ -14,13 +14,14 @@ import android.widget.TextView;
 
 import com.weiss.bubblechat.R;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
 public class ChatArrayAdapter extends ArrayAdapter<ChatMessage> {
 
 	private TextView chatText;
-	private List<ChatMessage> chatMessageList = new ArrayList<ChatMessage>();
+	private static List<ChatMessage> chatMessageList = new ArrayList<ChatMessage>();
 	private LinearLayout singleMessageContainer;
 
 	@Override
@@ -32,6 +33,7 @@ public class ChatArrayAdapter extends ArrayAdapter<ChatMessage> {
 	public ChatArrayAdapter(Context context, int textViewResourceId) {
 		super(context, textViewResourceId);
 	}
+
 
 	public int getCount() {
 		return this.chatMessageList.size();
@@ -60,6 +62,14 @@ public class ChatArrayAdapter extends ArrayAdapter<ChatMessage> {
 
 	public Bitmap decodeToBitmap(byte[] decodedByte) {
 		return BitmapFactory.decodeByteArray(decodedByte, 0, decodedByte.length);
+	}
+
+	public void setArrayList(ArrayList<ChatMessage> history) {
+		this.chatMessageList = history;
+	}
+
+	public List<ChatMessage> getHistory() {
+		return this.chatMessageList;
 	}
 
 }

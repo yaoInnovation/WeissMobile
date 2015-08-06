@@ -1,6 +1,5 @@
 <resources>
-    <string name="app_name">BubbleChat</string>
+    <string name="app_name">Weiss</string>
     <string name="action_settings">Settings</string>
-    <string name="hello">Hello World, MainActivity</string>
 
 </resources>
